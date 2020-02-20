@@ -1,17 +1,14 @@
 from os.path import exists
 
-with open("./train.enzh.src", "r") as enzh_src:
-  print("Source: ",enzh_src.readline())
-with open("./train.enzh.mt", "r") as enzh_mt:
-  print("Translation: ",enzh_mt.readline())
-with open("./train.enzh.scores", "r") as enzh_scores:
-  print("Score: ",enzh_scores.readline())
-
 ##################################
 # English embedding with glove
 ##################################
 import torchtext
 import spacy
+import random
+import numpy as np
+from sklearn.decomposition import PCA
+pca = PCA(n_components = 1)
 
 #Embeddings
 glove = torchtext.vocab.GloVe(name='6B', dim=100)
@@ -44,18 +41,24 @@ def get_word_vector(embeddings, word):
       vec = embeddings.vectors[embeddings.stoi[word]]
       return vec
     except KeyError:
-      #print(f"Word {word} does not exist")
-      pass
+      zeros = [1 for n in range(100)]
+      return zeros
 
 def get_sentence_vector(embeddings,line):
   vectors = []
   for w in line:
     emb = get_word_vector(embeddings,w)
-    #do not add if the word is out of vocabulary
-    if emb is not None:
-      vectors.append(emb)
-   
-  return torch.mean(torch.stack(vectors))
+    vectors.append(emb) # if the word is out of the vocabulary, we would add 0s into 'vectors'
+  vectors = np.array(vectors) # if we have 5 words, vectors would be 5 x 100
+  one_word = False
+  if len(one_word) < 2:
+    one_word = True
+  vectors = vectors.transpose() # now, the dimension is 100 x 5
+  if not one_word:
+    vectors = pca.fit_transform(vectors) # now the dimension is 100 x 1
+  vectors = vectors.reshape(1, 100)
+  return vectors
+  # return torch.mean(torch.stack(vectors))
 
 
 def get_embeddings(f,embeddings,lang):
@@ -67,10 +70,11 @@ def get_embeddings(f,embeddings,lang):
     sentence= preprocess(l,lang)
     try:
       vec = get_sentence_vector(embeddings,sentence)
-      sentences_vectors.append(vec)
+      sentences_vectors.extend(vec)
     except:
-      sentences_vectors.append(0)
-
+      zeros = np.ones((1,100))
+      sentences_vectors.extend(zeros)
+  
   return sentences_vectors
 
 #########################################
@@ -107,23 +111,29 @@ def get_sentence_vector_zh(line):
       emb = wv_from_bin[w] # obtain embedding from our embedding table with. a dimension of 100
       vectors.append(emb) # embeddings are concatenated one after another, we change the row rather than the column
     except:
-      pass #Do not add if the word is out of vocabulary
-  if vectors:
-    vectors = np.array(vectors)
-    return np.average(vectors)  # we would return a number, which represents the whole sentence.
-  else:
-    return 0
+      zeros = [random.random()/10000 for n in range(100)]
+      vectors.append(zeros)
+    # print('PERFORM PCA ON CHINESE SENTENCES...')
+  vectors = np.array(vectors) # 100
+  one_word = False
+  if len(vectors) < 2:
+    one_word = True
+  vectors = vectors.transpose() # now, the dimension is 100 x 5
+  if not one_word:
+    vectors = pca.fit_transform(vectors) # now the dimension is 100 x 1
+  vectors = vectors.reshape(1, 100)
+  return vectors
+  # return np.average(vectors)  # we would return a number, which represents the whole sentence.
 
 def get_sentence_embeddings_zh(f):
   file = open(f) 
   lines = file.readlines() 
-  sentences_vectors =[]
+  sentences_vectors =[] # 7000 x 100
   for l in lines:
     sent  = processing_zh(l)
     vec = get_sentence_vector_zh(sent)
-
     if vec is not None:
-      sentences_vectors.append(vec)
+      sentences_vectors.extend(vec)
     else:
       print(l)
   return sentences_vectors
@@ -133,9 +143,10 @@ import torchtext
 from torchtext import data
 
 # two scalar obtained after 'get embeddings' methods.
+print('Perform PCA on chinese ...')
 zh_train_mt = get_sentence_embeddings_zh("./train.enzh.mt") # Translation Result, we would get embeddings of sentennces, one scalar for one sentence
+print('Perform PCA on English ...')
 zh_train_src = get_embeddings("./train.enzh.src",glove,nlp_en) # English source text
-# print(len(zh_train_mt))
 f_train_scores = open("./train.enzh.scores",'r')
 zh_train_scores = f_train_scores.readlines() # Translation Score
 
@@ -147,13 +158,13 @@ zh_val_scores = f_val_scores.readlines()
 
 
 import numpy as np
+zh_train_src_debug = np.array(zh_train_src)
+zh_train_mt_debug = np.array(zh_train_mt)
+X_train = np.concatenate((zh_train_src, zh_train_mt), axis=1) # 7000 x 200
+X_train_zh = X_train
 
-
-X_train= [np.array(zh_train_src),np.array(zh_train_mt)] # dimension 2x7000
-X_train_zh = np.array(X_train).transpose() # dimension 7000 x 2
-
-X_val = [np.array(zh_val_src),np.array(zh_val_mt)]
-X_val_zh = np.array(X_val).transpose()
+X_val = np.concatenate((zh_val_src, zh_val_mt), axis = 1)
+X_val_zh = X_val
 
 #Scores
 train_scores = np.array(zh_train_scores).astype(float)
@@ -170,15 +181,34 @@ import numpy as np
 def rmse(predictions, targets):
     return np.sqrt(((predictions - targets) ** 2).mean())
 
-from sklearn.svm import SVR
+############################
+# SVR Regressor
+############################
+
+# from sklearn.svm import SVR
 from scipy.stats.stats import pearsonr
 
-for k in ['linear','poly','rbf','sigmoid']:
-    clf_t = SVR(kernel=k)
-    clf_t.fit(X_train_zh, y_train_zh)
-    print(k)
-    predictions = clf_t.predict(X_val_zh)
-    pearson = pearsonr(y_val_zh, predictions)
-    # print(pearson)
-    print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
-    print()
+# for k in ['linear','poly','rbf','sigmoid']:
+#     clf_t = SVR(kernel=k)
+#     clf_t.fit(X_train_zh, y_train_zh)
+#     print(k)
+#     predictions = clf_t.predict(X_val_zh)
+#     pearson = pearsonr(y_val_zh, predictions)
+#     # print(pearson)
+#     print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
+#     print()
+
+############################
+# MLPR Regrssor
+############################
+
+from sklearn.neural_network import MLPRegressor
+for k in ['identity', 'logistic', 'tanh', 'relu']:
+  mlp = MLPRegressor(activation=k)
+  # print('input shapes are {} and {}'.format(X_train_zh.shape, y_train_zh.shape))
+  mlp.fit(X_train_zh, y_train_zh)
+  print(k)
+  predictions =  mlp.predict(X_val_zh)
+  pearson = pearsonr(y_val_zh, predictions)
+  print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
+  print()
