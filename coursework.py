@@ -212,3 +212,58 @@ for k in ['identity', 'logistic', 'tanh', 'relu']:
   pearson = pearsonr(y_val_zh, predictions)
   print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
   print()
+    
+    
+    
+#################################
+# smooth inverse frequency (SIF)
+################################
+def calculate_words(lines,lang):
+  word_size = 0
+  word_dic={}
+  for l in lines:
+    sentence= preprocess(l,lang)
+    for w in sentence:
+      if w not in word_dic:
+        word_dic[w]=1
+      else:
+        word_dic[w] =word_dic[w]+1
+      word_size = word_size +1
+  return word_size,word_dic
+
+def get_sentence_vector_sif(embeddings,line,word_size,dic):
+  alpha = 0.3
+  emb = torch.zeros(100)
+  for w in line:
+    pw = (dic[w]/word_size)
+    # print(pw)
+    word_vectors= get_word_vector(embeddings,w)
+    #print(word_vectors.shape)
+    emb = emb +(alpha/(alpha+pw))*word_vectors  # Aplly SIF method
+    #print(emb)
+  emb = emb/len(line)
+
+  return np.array(emb)
+
+def get_embeddings_sif(f,embeddings,lang):
+  file = open(f) 
+  lines = file.readlines() 
+  sentences_vectors =[]
+  word_size, dic = calculate_words(lines,lang)
+  #print(word_size)
+  #print(dic['his'])
+  for l in lines:
+    sentence= preprocess(l,lang)
+   # print(sentence)
+    try:
+      vec = get_sentence_vector_sif(embeddings,sentence,word_size,dic)
+      sentences_vectors.append(vec)
+    except:
+      ones= np.ones((1,100))
+      sentences_vectors.extend(ones)
+
+  return sentences_vectors
+'''
+Combine SIF(en) and PCA(zh) + SVM 'rbf': scores 0.3
+'''
+    
