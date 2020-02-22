@@ -265,5 +265,8 @@ def get_embeddings_sif(f,embeddings,lang):
   return sentences_vectors
 '''
 Combine SIF(en) and PCA(zh) + SVM 'rbf': scores 0.3
+zh_val_src = get_embeddings_sif("./dev.enzh.src",glove,nlp_en)
+zh_train_mt = get_sentence_embeddings_zh("./train.enzh.mt") # Translation Result, we would get embeddings of sentennces, one scalar for one sentence
+
 '''
     
