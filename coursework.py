@@ -263,6 +263,49 @@ def get_embeddings_sif(f,embeddings,lang):
       sentences_vectors.extend(ones)
 
   return sentences_vectors
+def get_sentence_vector_zh_sif(line,word_size,dic):
+  alpha = 0.3
+  emb = np.array([0 for i in range(100)])
+  for w in line:
+    pw = (dic[w]/word_size)
+    try:
+      word_vectors = wv_from_bin[w] # obtain embedding from our embedding table with. a dimension of 100
+      
+      emb = emb +(alpha/(alpha+pw))*np.array(word_vectors) # embeddings are concatenated one after another, we change the row rather than the column
+    except:
+      zeros = [random.random()/10000 for n in range(100)]
+      emb = emb +np.array(zeros)
+  return np.array(emb)
+
+def calculate_words_zh(lines):
+  word_size = 0
+  word_dic={}
+  for l in lines:
+    sentence= processing_zh(l)
+    for w in sentence:
+      if w not in word_dic:
+        word_dic[w]=1
+      else:
+        word_dic[w] =word_dic[w]+1
+      word_size = word_size +1
+  return word_size,word_dic
+
+def get_sentence_embeddings_zh_sif(f):
+  file = open(f) 
+  lines = file.readlines() 
+  word_size, dic = calculate_words_zh(lines)
+  sentences_vectors =[] # 7000 x 100
+  for l in lines:
+    sent  = processing_zh(l)
+    vec = get_sentence_vector_zh_sif(sent,word_size,dic)
+    if vec is not None:
+      sentences_vectors.append(vec)
+    else:
+      ones= np.ones((1,100))
+      sentences_vectors.append(ones)
+      print(l)
+  return sentences_vectors
+
 '''
 Combine SIF(en) and PCA(zh) + SVM 'rbf': scores 0.3
 zh_val_src = get_embeddings_sif("./dev.enzh.src",glove,nlp_en)
