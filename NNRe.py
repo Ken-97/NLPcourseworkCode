@@ -2,10 +2,14 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence, pack_sequence
+from transformers import DistilBertModel, DistilBertTokenizer
+import numpy as np
 
+
+pretrained_weights = 'distilbert-base-uncased'
 
 class RegressionDataset:
-    def __init__(self, src_file_path, tar_file_path, lang="en"):
+    def __init__(self, src_file_path, tar_file_path, score_path,lang="en"):
         self.src_file = src_file_path
         self.tar_file = tar_file_path
         self.lang = lang
@@ -13,7 +17,9 @@ class RegressionDataset:
         self.src_vocab.build_from_file(src_file_path)
         self.tar_vocab = Vocabulary()
         self.tar_vocab.build_from_file(tar_file_path)
+        self.score_path = score_path
         self.padded_idxs = None
+        self.attention_mask = None
 
         sents_idx = []
 
@@ -21,10 +27,10 @@ class RegressionDataset:
             lines = f.readlines()
             for l in lines:
                 sentence = self.processing_zh(l)
-                idxs = self.src_vocab.convert_words_to_idxs(sentence, add_eos=True)
+
                 sents_idx.append(idxs)
 
-        sents_src_transformed = [torch.Tensor(sent) for sent in sents_idx]
+        sents_src_transformed = [torch.tensor(sent) for sent in sents_idx]
         padded_idxs_src = pad_sequence([*sents_src_transformed]).squeeze
 
         with open(self.tar_file, "r") as f:
@@ -34,17 +40,26 @@ class RegressionDataset:
                 idxs = self.src_vocab.convert_words_to_idxs(sentence, add_eos=True)
                 sents_idx.append(idxs)
 
-        sents_tar_transformed = [torch.Tensor(sent) for sent in sents_idx]
+        sents_tar_transformed = [torch.tensor(sent) for sent in sents_idx]
         padded_idxs_tar = pad_sequence([*sents_tar_transformed]).squeeze
 
         self.padded_idxs = torch.cat((padded_idxs_src, padded_idxs_tar))
+        self.attention_mask = torch.where(self.padded_idxs != 0, 1, 0)
 
     def __getitem__(self, idx):
-        #TODO put in score here
-        return self.padded_idxs[idx], score
+
+        score = self.get_scores()
+        return self.padded_idxs[idx], score[idx], self.attention_mask
 
     def __len__(self):
         return len(self.padded_idxs)
+
+    def get_scores(self):
+        with open(self.score_path, "r") as f:
+            scores = f.readlines()
+            scores = np.array(scores).astype(float)
+            scores = torch.tensor(scores)
+            return scores
 
 
     @staticmethod
@@ -122,3 +137,9 @@ class Vocabulary(object):
 
   def __repr__(self):
     return "Vocabulary with {} items".format(self.__len__())
+
+tokenizer = DistilBertTokenizer()
+model = DistilBertModel()
+
+tokenizer = tokenizer.from_pretrained(pretrained_weights)
+model = model.from_pretrained(pretrained_weights)

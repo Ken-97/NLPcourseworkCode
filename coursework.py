@@ -312,52 +312,6 @@ def rm_principal_component(X):
   return X_rm
 
 
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
-
-
-#
-# class RegressionDataset:
-#     def __init__(self, file_path, lang="en"):
-#         self.file = file_path
-#         self.lang = lang
-#         # Create vocabularies
-#         self.src_vocab = Vocabulary()
-#         self.src_vocab.build_from_file(f'train.{src_lang}')
-#         self.trg_vocab = Vocabulary()
-#         self.trg_vocab.build_from_file(f'train.{trg_lang}')
-#         self.max_len = 0
-#
-#         with open(self.file, "r") as f:
-#           lines = f.readlines()
-#           sentences_list = []
-#           for l in lines:
-#               if self.lang == "en":
-#                 sentence = self.process(l)
-#               elif self.lang == "zh":
-#                 sentence = self.processing_
-#
-#
-#     def get_sentence
-#
-#     @staticmethod
-#     def processing_zh(sentence):
-#         # a chinese sentence is inputed and tokenized
-#         seg_list = jieba.lcut(sentence, cut_all = True)
-#         doc = [word for word in seg_list if word not in stop_words and word != ' ' and word != '\n']
-#         docs = [e for e in doc if e.isalnum()]
-#         return docs
-#
-#     @staticmethod
-#     def process(sentence, nlp):
-#         text = sentence.lower()
-#         doc = [token.lemma_ for token in nlp.tokenizer(text)]
-#         doc = [word for word in doc if word not in stop_words_en]
-#         doc = [word for word in doc if word.isalpha()]  # restricts string to alphabetic characters only
-#         return doc
-
-
-
 
 # two scalar obtained after 'get embeddings' methods.
 # print('Perform PCA on chinese ...')
@@ -396,34 +350,34 @@ val_scores = get_scores("./dev.enzh.scores")
 # TRAINING REGRESSOR #
 ######################
 
-def rmse(predictions, targets):
-    return np.sqrt(((predictions - targets) ** 2).mean())
-
-
-en_train_src_sif = get_embeddings_sif("./train.enzh.src",glove,nlp_en)
-en_val_src_sif = get_embeddings_sif("./dev.enzh.src",glove,nlp_en)
-zh_train_mt_sif = get_sentence_embeddings_zh_sif("./train.enzh.mt")
-zh_val_mt_sif = get_sentence_embeddings_zh_sif("./dev.enzh.mt")
-
-X_train = np.concatenate((en_train_src_sif, zh_train_mt_sif), axis=1) # 7000 x 200
-X_val = np.concatenate((en_val_src_sif, zh_val_mt_sif), axis=1)
-
-############################
-# SVR Regressor
-############################
-
-from sklearn.svm import SVR
-from scipy.stats.stats import pearsonr
-
-for k in ['linear','poly','rbf','sigmoid']:
-    clf_t = SVR(kernel=k, gamma="auto")
-    clf_t.fit(X_train, train_scores)
-    print(k)
-    predictions = clf_t.predict(X_val)
-    pearson = pearsonr(val_scores, predictions)
-    print(pearson)
-    print(f'RMSE: {rmse(predictions,val_scores)} Pearson {pearson[0]}')
-    print()
+# def rmse(predictions, targets):
+#     return np.sqrt(((predictions - targets) ** 2).mean())
+#
+#
+# en_train_src_sif = get_embeddings_sif("./train.enzh.src",glove,nlp_en)
+# en_val_src_sif = get_embeddings_sif("./dev.enzh.src",glove,nlp_en)
+# zh_train_mt_sif = get_sentence_embeddings_zh_sif("./train.enzh.mt")
+# zh_val_mt_sif = get_sentence_embeddings_zh_sif("./dev.enzh.mt")
+#
+# X_train = np.concatenate((en_train_src_sif, zh_train_mt_sif), axis=1) # 7000 x 200
+# X_val = np.concatenate((en_val_src_sif, zh_val_mt_sif), axis=1)
+#
+# ############################
+# # SVR Regressor
+# ############################
+#
+# from sklearn.svm import SVR
+# from scipy.stats.stats import pearsonr
+#
+# for k in ['linear','poly','rbf','sigmoid']:
+#     clf_t = SVR(kernel=k, gamma="auto")
+#     clf_t.fit(X_train, train_scores)
+#     print(k)
+#     predictions = clf_t.predict(X_val)
+#     pearson = pearsonr(val_scores, predictions)
+#     print(pearson)
+#     print(f'RMSE: {rmse(predictions,val_scores)} Pearson {pearson[0]}')
+#     print()
 
 ############################
 # MLPR Regrssor
@@ -441,3 +395,173 @@ for k in ['linear','poly','rbf','sigmoid']:
 #   print()
 # Combine SIF(en) and PCA(zh) + SVM 'rbf': scores 0.3
 
+############################
+# NNdataset
+############################
+
+import torch
+from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence, pack_sequence
+from transformers import DistilBertModel, DistilBertTokenizer
+import numpy as np
+
+pretrained_weights = 'distilbert-base-uncased'
+
+
+class RegressionDataset:
+  '''
+  load english and chinese corpus via their pathes. tokenize them with process function.
+  Then we create idx2word dict with class Vocabulary for all the words in the corresponding corpus.
+  Using this dict, we convert all the words, start stop as well as padding sign in each sentence into vector filled with
+  idx.
+  Then we concatenate both english and chinese sentences matrix as our input data, we load the corresponding scores as labels.
+  '''
+  def __init__(self, src_file_path, tar_file_path, score_path):
+    self.src_file = src_file_path
+    self.tar_file = tar_file_path
+    self.src_vocab = Vocabulary()
+    self.src_vocab.build_from_file(src_file_path)
+    self.tar_vocab = Vocabulary()
+    self.tar_vocab.build_from_file(tar_file_path)
+    self.score_path = score_path
+    self.padded_idxs = None
+    self.attention_mask = None
+
+    sents_idx_en = []
+
+    with open(self.src_file, "r") as f:
+      lines = f.readlines()
+      for l in lines:
+        sentence = self.processing_zh(l)
+        idxs = self.src_vocab.convert_words_to_idxs(sentence, add_eos=True)
+        sents_idx_en.append(idxs)
+
+    sents_src_transformed = [torch.tensor(sent).unsqueeze(1) for sent in sents_idx_en]
+    padded_idxs_src = pad_sequence([sent for sent in sents_src_transformed]).transpose(0, 1).squeeze(2)
+
+    sents_idx_zh = []
+    with open(self.tar_file, "r") as f:
+      lines = f.readlines()
+      for l in lines:
+        sentence = self.processing_zh(l)
+        idxs = self.src_vocab.convert_words_to_idxs(sentence, add_eos=True)
+        sents_idx_zh.append(idxs)
+
+    sents_tar_transformed = [torch.tensor(sent).unsqueeze(1) for sent in sents_idx_zh]
+    padded_idxs_tar = pad_sequence([sent for sent in sents_tar_transformed]).transpose(0, 1).squeeze(2)
+
+
+    self.padded_idxs = torch.cat((padded_idxs_src, padded_idxs_tar), dim=1)
+    zeros = torch.zeros(self.padded_idxs.shape)
+    ones = torch.ones(self.padded_idxs.shape)
+    self.attention_mask = torch.where(self.padded_idxs != 0, ones, zeros)
+
+  def __getitem__(self, idx):
+
+    score = self.get_scores()
+    return self.padded_idxs[idx], score[idx], self.attention_mask
+
+  def __len__(self):
+    return len(self.padded_idxs)
+
+  def get_scores(self):
+    with open(self.score_path, "r") as f:
+      scores = f.readlines()
+      scores = np.array(scores).astype(float)
+      scores = torch.tensor(scores)
+      return scores
+
+  @staticmethod
+  def processing_zh(sentence):
+    # a chinese sentence is inputed and tokenized
+    seg_list = jieba.lcut(sentence, cut_all=True)
+    doc = [word for word in seg_list if word not in stop_words and word != ' ' and word != '\n']
+    docs = [e for e in doc if e.isalnum()]
+    return docs
+
+
+class Vocabulary(object):
+  """Data structure representing the vocabulary of a corpus."""
+
+  def __init__(self):
+    # Mapping from tokens to integers
+    self._word2idx = {}
+
+    # Reverse-mapping from integers to tokens
+    self.idx2word = []
+
+    # 0-padding token
+    self.add_word('<pad>')
+    # sentence start
+    self.add_word('<s>')
+    # sentence end
+    self.add_word('</s>')
+    # Unknown words
+    self.add_word('<unk>')
+
+    self._pad_idx = self._word2idx['<pad>']
+    self._bos_idx = self._word2idx['<s>']
+    self._eos_idx = self._word2idx['</s>']
+    self._unk_idx = self._word2idx['<unk>']
+
+  def word2idx(self, word):
+    """Returns the integer ID of the word or <unk> if not found."""
+    return self._word2idx.get(word, self._unk_idx)
+
+  def add_word(self, word):
+    """Adds the `word` into the vocabulary."""
+    if word not in self._word2idx:
+      self.idx2word.append(word)
+      self._word2idx[word] = len(self.idx2word) - 1
+
+  def build_from_file(self, fname):
+    """Builds a vocabulary from a given corpus file."""
+    with open(fname) as f:
+      for line in f:
+        words = line.strip().split()
+        for word in words:
+          self.add_word(word)
+
+  def convert_idxs_to_words(self, idxs, until_eos=False):
+    """Converts a list of indices to words."""
+    if until_eos:
+      try:
+        idxs = idxs[:idxs.index(self.word2idx('</s>'))]
+      except ValueError:
+        pass
+
+    return ' '.join(self.idx2word[idx] for idx in idxs)
+
+  def convert_words_to_idxs(self, words, add_bos=False, add_eos=False):
+    """Converts a list of words to a list of indices."""
+    idxs = [self.word2idx(w) for w in words]
+    if add_bos:
+      idxs.insert(0, self.word2idx('<s>'))
+    if add_eos:
+      idxs.append(self.word2idx('</s>'))
+    return idxs
+
+  def __len__(self):
+    """Returns the size of the vocabulary."""
+    return len(self.idx2word)
+
+
+batch_size = 128
+
+
+train_dat = RegressionDataset("train.enzh.src", "train.enzh.mt", "train.enzh.scores")
+loader_train = DataLoader(train_dat, batch_size, shuffle=True)
+
+samples, scores, mask = next(iter(loader_train))
+print(samples.shape)
+
+test_dat = RegressionDataset("dev.enzh.src", "dev.enzh.mt", "dev.enzh.scores")
+loader_train = DataLoader(train_dat, batch_size, shuffle=True)
+
+
+# tokenizer = DistilBertTokenizer()
+# model = DistilBertModel()
+#
+# tokenizer = tokenizer.from_pretrained(pretrained_weights)
+# model = model.from_pretrained(pretrained_weights)
