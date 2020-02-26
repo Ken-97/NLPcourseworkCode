@@ -366,8 +366,8 @@ val_scores = get_scores("./dev.enzh.scores")
 # # SVR Regressor
 # ############################
 #
-# from sklearn.svm import SVR
-# from scipy.stats.stats import pearsonr
+from sklearn.svm import SVR
+from scipy.stats.stats import pearsonr
 #
 # for k in ['linear','poly','rbf','sigmoid']:
 #     clf_t = SVR(kernel=k, gamma="auto")
@@ -402,11 +402,11 @@ val_scores = get_scores("./dev.enzh.scores")
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence, pack_sequence
-from transformers import DistilBertModel, DistilBertTokenizer
+from torch.nn.utils.rnn import pad_sequence
+from transformers import BertModel
 import numpy as np
+import torch.nn as nn
 
-pretrained_weights = 'distilbert-base-uncased'
 
 
 class RegressionDataset:
@@ -420,6 +420,7 @@ class RegressionDataset:
   def __init__(self, src_file_path, tar_file_path, score_path):
     self.src_file = src_file_path
     self.tar_file = tar_file_path
+    #TODO two vocabulary classes
     self.src_vocab = Vocabulary()
     self.src_vocab.build_from_file(src_file_path)
     self.tar_vocab = Vocabulary()
@@ -451,7 +452,7 @@ class RegressionDataset:
     sents_tar_transformed = [torch.tensor(sent).unsqueeze(1) for sent in sents_idx_zh]
     padded_idxs_tar = pad_sequence([sent for sent in sents_tar_transformed]).transpose(0, 1).squeeze(2)
 
-
+    #TODO roughly concatenate 1 idx to two entities(Chinese, English)
     self.padded_idxs = torch.cat((padded_idxs_src, padded_idxs_tar), dim=1)
     zeros = torch.zeros(self.padded_idxs.shape)
     ones = torch.ones(self.padded_idxs.shape)
@@ -460,7 +461,7 @@ class RegressionDataset:
   def __getitem__(self, idx):
 
     score = self.get_scores()
-    return self.padded_idxs[idx], score[idx], self.attention_mask
+    return self.padded_idxs[idx], score[idx], self.attention_mask[idx]
 
   def __len__(self):
     return len(self.padded_idxs)
@@ -547,9 +548,47 @@ class Vocabulary(object):
     return len(self.idx2word)
 
 
+
+class RegressionBert(nn.Module):
+  def __init__(self, hidden_dim, transformer_model):
+    super(RegressionBert, self).__init__()
+    self.transformer = transformer_model
+    self.fc1 = nn.Sequential(
+      nn.Linear(768, hidden_dim),
+      nn.ReLU()
+    )
+    self.fc2 = nn.Linear(hidden_dim, 1)
+
+  def forward(self, input_ids=None, attention_mask=None):
+    '''
+    The outputs from distil_bert pretrained model are last-layer hidden-state, (all hidden_states), (all attentions)
+    Since we are more interested in last hidden states, we slice them out. However, the shape of last hidden states are
+    batch_size* sentence_length * 768, which is still extremely big for fc layers. For simplicity, we take the first token of
+    each sentence and send them into fc layers. The outputs from fc layers are scores of each translation pairs, which is
+    exactly what we want. Using mse loss, we do a backward propagation over our model.
+    :param inputs: shape batch_size * sentence_length(padded)
+    :param attention_mask:
+    :return:
+    '''
+    for i in range(input_ids.shape[0]):
+      print(input_ids[i])
+    output_tuples = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
+    last_hidden_states = output_tuples[0]
+    features = last_hidden_states[:, 0, :].squeeze(1)
+    out = self.fc1(features)
+    out = self.fc2(out)
+    return out
+
+device_idx = 0
+GPU = True
+if GPU:
+    device = torch.device("cuda:" + str(device_idx) if torch.cuda.is_available() else "cpu")
+else:
+    device = torch.device("cpu")
+
 batch_size = 128
-
-
+epoch_num = 10
+lr_rate = 0.001
 train_dat = RegressionDataset("train.enzh.src", "train.enzh.mt", "train.enzh.scores")
 loader_train = DataLoader(train_dat, batch_size, shuffle=True)
 
@@ -559,9 +598,45 @@ print(samples.shape)
 test_dat = RegressionDataset("dev.enzh.src", "dev.enzh.mt", "dev.enzh.scores")
 loader_train = DataLoader(train_dat, batch_size, shuffle=True)
 
+distil_bert = BertModel.from_pretrained("bert-base-uncased")
 
-# tokenizer = DistilBertTokenizer()
-# model = DistilBertModel()
-#
-# tokenizer = tokenizer.from_pretrained(pretrained_weights)
-# model = model.from_pretrained(pretrained_weights)
+model = RegressionBert(hidden_dim=16, transformer_model=distil_bert)
+optimizer = torch.optim.Adam(model.parameters(), lr=lr_rate)
+criterion = nn.MSELoss()
+
+model.to(device)
+model.train()
+
+############################
+###training
+############################
+for epoch in range(epoch_num):
+
+    epoch_loss = 0
+    for i, (samples, scores, mask) in enumerate(loader_train):
+
+        predictions = model(input_ids=samples, attention_mask=mask)
+        loss = criterion(scores, predictions)
+        loss = loss/batch_size
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+
+    print('epoch [{}/{}], loss = {:.6f}'.format(epoch, epoch_num, epoch_loss / len(loader_train)))
+
+
+############################
+###testing
+############################
+loader_test = DataLoader(test_dat, batch_size, shuffle=True)
+test_samples, test_scores, _ = next(iter(loader_test))
+
+with torch.no_grad():
+
+  predictions = model(test_samples)
+  pearson = pearsonr(test_scores, predictions)
+
+
+
