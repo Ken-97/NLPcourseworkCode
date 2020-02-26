@@ -406,7 +406,7 @@ from torch.nn.utils.rnn import pad_sequence
 from transformers import BertModel
 import numpy as np
 import torch.nn as nn
-
+from collections import defaultdict, Counter
 
 def en_tokenizer(sentence):
   text = sentence.lower()
@@ -440,6 +440,8 @@ class RegressionDataset:
     self.score_path = score_path
     self.padded_idxs = None
     self.attention_mask = None
+
+    self.vocab.rm_less_frequent(min_size=5)
 
     print(len(self.vocab))
 
@@ -490,12 +492,15 @@ class RegressionDataset:
 
 
 class NLPVocabulary(object):
+  '''
+  Choose whether to add bos or eos to each sentence by setting add_bos add_eos
+  Choose min_size to kick out less frequent vocab.
+  '''
 
   def __init__(self):
 
     self._word2idx = {}
-    self.idx2word = []
-
+    self.vocab_counter = Counter()
     # 0-padding token
     self.add_word('<pad>')
     # sentence start
@@ -511,13 +516,22 @@ class NLPVocabulary(object):
     self._unk_idx = self._word2idx['<unk>']
 
   def word2idx(self, word):
-    return self._word2idx.get(word, self._unk_idx)
+    if word not in self._word2idx:
+      idx = self._unk_idx
+    else:
+      idx = self._word2idx[word]
+    return idx
 
   def add_word(self, word):
-
     if word not in self._word2idx:
-      self.idx2word.append(word)
-      self._word2idx[word] = len(self.idx2word) - 1
+      if not self._word2idx:
+        self._word2idx[word] = 0
+      else:
+        self._word2idx[word] = len(self._word2idx)
+
+  def count_word(self, word):
+
+    self.vocab_counter[word] += 1
 
   def add_from_file(self, fname, lang):
 
@@ -526,20 +540,22 @@ class NLPVocabulary(object):
         for line in f:
           tokens = en_tokenizer(line)
           for tk in tokens:
-            if not self.check_maximum():
-              break
-            self.add_word(tk)
+            self.count_word(tk)
 
       if lang == "zh":
         for line in f:
           tokens = zh_tokenizer(line)
           for tk in tokens:
-            if not self.check_maximum():
-              break
-            self.add_word(tk)
+            self.count_word(tk)
 
-  def check_maximum(self):
-      return len(self.idx2word) < 30521
+  def rm_less_frequent(self, min_size):
+    '''
+    remove vocabulary that is less frequent
+    :return:
+    '''
+    self._list_reduced = [word for word, item in self.vocab_counter.items() if item > min_size]
+    for idx, word in enumerate(self._list_reduced):
+      self._word2idx[word] = idx+3
 
   def convert_words_to_idxs(self, words, add_bos=False, add_eos=False):
 
@@ -551,7 +567,7 @@ class NLPVocabulary(object):
     return idxs
 
   def __len__(self):
-    return len(self.idx2word)
+    return len(self._word2idx)
 
 
 
