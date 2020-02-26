@@ -143,20 +143,20 @@ def get_sentence_vector_zh(line):
   return vectors
   # return np.average(vectors)  # we would return a number, which represents the whole sentence.
 
-def get_sentence_embeddings_zh(f):
-
-  file = open(f)
-  lines = file.readlines()
-  sentences_vectors =[] # 7000 x 100 in the future
-
-  for l in lines:
-    sent = processing_zh(l)
-    vec = get_sentence_vector_zh(sent)
-    if vec is not None:
-      sentences_vectors.extend(vec)
-    else:
-      print(l)
-  return sentences_vectors
+# def get_sentence_embeddings_zh(f):
+#
+#   file = open(f)
+#   lines = file.readlines()
+#   sentences_vectors =[] # 7000 x 100 in the future
+#
+#   for l in lines:
+#     sent = processing_zh(l)
+#     vec = get_sentence_vector_zh(sent)
+#     if vec is not None:
+#       sentences_vectors.extend(vec)
+#     else:
+#       print(l)
+#   return sentences_vectors
 
     
 #################################
@@ -408,6 +408,19 @@ import numpy as np
 import torch.nn as nn
 
 
+def en_tokenizer(sentence):
+  text = sentence.lower()
+  doc = [token.lemma_ for token in nlp_en.tokenizer(text)]
+  doc = [word for word in doc if word not in stop_words_en]
+  doc = [word for word in doc if word.isalpha()]  # restricts string to alphabetic characters only
+  return doc
+
+def zh_tokenizer(sentence):
+  # a chinese sentence is inputed and tokenized
+  seg_list = jieba.lcut(sentence, cut_all=True)
+  doc = [word for word in seg_list if word not in stop_words and word != ' ' and word != '\n']
+  docs = [e for e in doc if e.isalnum()]
+  return docs
 
 class RegressionDataset:
   '''
@@ -420,22 +433,23 @@ class RegressionDataset:
   def __init__(self, src_file_path, tar_file_path, score_path):
     self.src_file = src_file_path
     self.tar_file = tar_file_path
-    #TODO two vocabulary classes
-    self.src_vocab = Vocabulary()
-    self.src_vocab.build_from_file(src_file_path)
-    self.tar_vocab = Vocabulary()
-    self.tar_vocab.build_from_file(tar_file_path)
+    self.vocab = NLPVocabulary()
+    self.vocab.add_from_file(fname=src_file_path, lang="en")
+    # self.tar_vocab = Vocabulary()
+    self.vocab.add_from_file(fname=tar_file_path, lang="zh")
     self.score_path = score_path
     self.padded_idxs = None
     self.attention_mask = None
+
+    print(len(self.vocab))
 
     sents_idx_en = []
 
     with open(self.src_file, "r") as f:
       lines = f.readlines()
       for l in lines:
-        sentence = self.processing_zh(l)
-        idxs = self.src_vocab.convert_words_to_idxs(sentence, add_eos=True)
+        sentence = en_tokenizer(l)
+        idxs = self.vocab.convert_words_to_idxs(sentence, add_eos=True)
         sents_idx_en.append(idxs)
 
     sents_src_transformed = [torch.tensor(sent).unsqueeze(1) for sent in sents_idx_en]
@@ -445,14 +459,13 @@ class RegressionDataset:
     with open(self.tar_file, "r") as f:
       lines = f.readlines()
       for l in lines:
-        sentence = self.processing_zh(l)
-        idxs = self.src_vocab.convert_words_to_idxs(sentence, add_eos=True)
+        sentence = zh_tokenizer(l)
+        idxs = self.vocab.convert_words_to_idxs(sentence, add_eos=True)
         sents_idx_zh.append(idxs)
 
     sents_tar_transformed = [torch.tensor(sent).unsqueeze(1) for sent in sents_idx_zh]
     padded_idxs_tar = pad_sequence([sent for sent in sents_tar_transformed]).transpose(0, 1).squeeze(2)
 
-    #TODO roughly concatenate 1 idx to two entities(Chinese, English)
     self.padded_idxs = torch.cat((padded_idxs_src, padded_idxs_tar), dim=1)
     zeros = torch.zeros(self.padded_idxs.shape)
     ones = torch.ones(self.padded_idxs.shape)
@@ -473,23 +486,14 @@ class RegressionDataset:
       scores = torch.tensor(scores)
       return scores
 
-  @staticmethod
-  def processing_zh(sentence):
-    # a chinese sentence is inputed and tokenized
-    seg_list = jieba.lcut(sentence, cut_all=True)
-    doc = [word for word in seg_list if word not in stop_words and word != ' ' and word != '\n']
-    docs = [e for e in doc if e.isalnum()]
-    return docs
 
 
-class Vocabulary(object):
-  """Data structure representing the vocabulary of a corpus."""
+
+class NLPVocabulary(object):
 
   def __init__(self):
-    # Mapping from tokens to integers
-    self._word2idx = {}
 
-    # Reverse-mapping from integers to tokens
+    self._word2idx = {}
     self.idx2word = []
 
     # 0-padding token
@@ -507,35 +511,38 @@ class Vocabulary(object):
     self._unk_idx = self._word2idx['<unk>']
 
   def word2idx(self, word):
-    """Returns the integer ID of the word or <unk> if not found."""
     return self._word2idx.get(word, self._unk_idx)
 
   def add_word(self, word):
-    """Adds the `word` into the vocabulary."""
+
     if word not in self._word2idx:
       self.idx2word.append(word)
       self._word2idx[word] = len(self.idx2word) - 1
 
-  def build_from_file(self, fname):
-    """Builds a vocabulary from a given corpus file."""
+  def add_from_file(self, fname, lang):
+
     with open(fname) as f:
-      for line in f:
-        words = line.strip().split()
-        for word in words:
-          self.add_word(word)
+      if lang == "en":
+        for line in f:
+          tokens = en_tokenizer(line)
+          for tk in tokens:
+            if not self.check_maximum():
+              break
+            self.add_word(tk)
 
-  def convert_idxs_to_words(self, idxs, until_eos=False):
-    """Converts a list of indices to words."""
-    if until_eos:
-      try:
-        idxs = idxs[:idxs.index(self.word2idx('</s>'))]
-      except ValueError:
-        pass
+      if lang == "zh":
+        for line in f:
+          tokens = zh_tokenizer(line)
+          for tk in tokens:
+            if not self.check_maximum():
+              break
+            self.add_word(tk)
 
-    return ' '.join(self.idx2word[idx] for idx in idxs)
+  def check_maximum(self):
+      return len(self.idx2word) < 30521
 
   def convert_words_to_idxs(self, words, add_bos=False, add_eos=False):
-    """Converts a list of words to a list of indices."""
+
     idxs = [self.word2idx(w) for w in words]
     if add_bos:
       idxs.insert(0, self.word2idx('<s>'))
@@ -544,7 +551,6 @@ class Vocabulary(object):
     return idxs
 
   def __len__(self):
-    """Returns the size of the vocabulary."""
     return len(self.idx2word)
 
 
@@ -570,13 +576,14 @@ class RegressionBert(nn.Module):
     :param attention_mask:
     :return:
     '''
-    for i in range(input_ids.shape[0]):
-      print(input_ids[i])
+    # for i in range(input_ids.shape[0]):
+    #   print(input_ids[i])
     output_tuples = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
     last_hidden_states = output_tuples[0]
     features = last_hidden_states[:, 0, :].squeeze(1)
     out = self.fc1(features)
     out = self.fc2(out)
+    out = out.squeeze(1)
     return out
 
 device_idx = 0
@@ -592,15 +599,14 @@ lr_rate = 0.001
 train_dat = RegressionDataset("train.enzh.src", "train.enzh.mt", "train.enzh.scores")
 loader_train = DataLoader(train_dat, batch_size, shuffle=True)
 
-samples, scores, mask = next(iter(loader_train))
-print(samples.shape)
+
 
 test_dat = RegressionDataset("dev.enzh.src", "dev.enzh.mt", "dev.enzh.scores")
-loader_train = DataLoader(train_dat, batch_size, shuffle=True)
+loader_test = DataLoader(test_dat, batch_size, shuffle=True)
 
-distil_bert = BertModel.from_pretrained("bert-base-uncased")
+bert = BertModel.from_pretrained("bert-base-uncased")
 
-model = RegressionBert(hidden_dim=16, transformer_model=distil_bert)
+model = RegressionBert(hidden_dim=16, transformer_model=bert)
 optimizer = torch.optim.Adam(model.parameters(), lr=lr_rate)
 criterion = nn.MSELoss()
 
@@ -614,6 +620,8 @@ for epoch in range(epoch_num):
 
     epoch_loss = 0
     for i, (samples, scores, mask) in enumerate(loader_train):
+        samples = samples.to(device)
+        mask = mask.to(device)
 
         predictions = model(input_ids=samples, attention_mask=mask)
         loss = criterion(scores, predictions)
