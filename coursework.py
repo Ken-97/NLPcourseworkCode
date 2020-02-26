@@ -253,6 +253,7 @@ def get_sentence_vector_zh_sif(line, word_size, dic):
 
   return emb
 
+
 def calculate_words_zh(lines):
   '''
   Calculate the word frequency in Chinese corpus
@@ -295,7 +296,54 @@ def get_sentence_embeddings_zh_sif(f) -> np.ndarray:
   X_elite = rm_principal_component(X)
 
   return X_elite
+import jieba.posseg as pseg
+def get_postagger(line):
+ '''
+  Get POS embedding for Chinese sentence.
+  :param line:
+  :return: tagger embedding: np.ndarray shape:1 x 15
+  '''
+  num_tagger = 15
+  tagger=[0 for i in range(num_tagger)]
+  jieba_dic={'n':1,'f':2,	's':3,'t':4,'nr':5,	'ns':6,'nt':7	,	'nw':8	,'nz':9,		'v':10,	
+             'vd':11,		'vn':12,	'a':13,		'ad':14,	'an':15,		'd':16,	
+             'm':17,		'q':18,		'r':19,		'p':20,	
+             'c':21,		'u':22,		'xc':23,		'w':24,	
+             'PER':25,		'LOC':26,		'ORG':27,		'TIME':28	}
+  loc = 0
+  pos = pseg.cut(line,use_paddle=True) #paddle模式
+  #print(pos)
+  for word, flag in pos:
+    tagger[loc]=jieba_dic[flag]/10
+    loc = loc+1
+    if loc > num_tagger-1:
+      break
+    #print(flag)
+  return np.array(tagger)
 
+def get_sentence_embeddings_zh_sif_pos(f):
+  '''
+  Convert sentences from chinese corpus into sentences embeddings
+  Add POS tagger
+  :param f:
+  :return: sentences_vectors shape: np.ndarray shape:7000 x 115
+  '''
+  file = open(f) 
+  lines = file.readlines() 
+  word_size, dic = calculate_words_zh(lines)
+  sentences_vectors =[] # 7000 x 115
+  for l in lines:
+    sent  = processing_zh(l)
+    vec = get_sentence_vector_zh_sif(sent,word_size,dic)
+    postagger = get_postagger(l)
+   # print(postagger)
+    if vec is not None:
+      sentences_vectors.append(np.concatenate((vec, postagger), axis=0))
+    else:
+      ones= np.ones((1,115))
+      sentences_vectors.append(ones)
+      print(l)
+  return sentences_vectors
 
 def rm_principal_component(X):
   '''
