@@ -34,18 +34,23 @@ from nltk.corpus import stopwords
 # download('stopwords') #stopwords dictionary, run once
 stop_words_en = set(stopwords.words('english'))
 
-
+import nltk
+nltk.download('wordnet')
+from nltk.stem import WordNetLemmatizer 
+from nltk.stem.porter import *
+lemmatizer = WordNetLemmatizer() 
+stemmer = PorterStemmer()
+frequency = 3
 def preprocess(sentence:str, nlp):
-
     text = sentence.lower()
-    doc = [token.lemma_ for token in nlp.tokenizer(text)]
+    # Perform lemma and stem
+    doc = [stemmer.stem(token.lemma_) for token in  nlp.tokenizer(text)]
     doc = [word for word in doc if word not in stop_words_en]
     doc = [word for word in doc if word.isalpha()] #restricts string to alphabetic characters only
     return doc
 
 def get_word_vector(embeddings, word):
   # get word embedding from glove
-
     try:
       vec = embeddings.vectors[embeddings.stoi[word]]
       return vec
@@ -191,11 +196,15 @@ def get_sentence_vector_sif(embeddings,line,word_size,dic):
   :return:
   '''
   alpha = 0.3
+  frequency = 3
   emb = torch.zeros(100)
+  # filer out the words of low frequency
   for w in line:
+    if(dic[w]<frequency):
+      continue
     pw = (dic[w]/word_size)
     word_vectors = get_word_vector(embeddings, w)
-    emb = emb +(alpha/(alpha+pw))*word_vectors  # Aplly SIF method
+    emb = emb +(alpha/(alpha+pw))*word_vectors  # Apply SIF method
 
   emb = emb/len(line)
 
@@ -243,6 +252,8 @@ def get_sentence_vector_zh_sif(line, word_size, dic):
   alpha = 0.3
   emb = np.zeros(100)
   for w in line:
+    if dic[w]<frequency:
+      continue
     pw = (dic[w]/word_size)
     try:
       word_vectors = wv_from_bin[w]
@@ -311,7 +322,7 @@ def get_postagger(line):
              'c':21,		'u':22,		'xc':23,		'w':24,	
              'PER':25,		'LOC':26,		'ORG':27,		'TIME':28	}
   loc = 0
-  pos = pseg.cut(line,use_paddle=True) #paddle模式
+  pos = pseg.cut(line,use_paddle=True) #paddle
   #print(pos)
   for word, flag in pos:
     tagger[loc]=jieba_dic[flag]/10
