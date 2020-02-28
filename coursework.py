@@ -1,8 +1,8 @@
 from os.path import exists
 
-##################################
+###################################################################
 # English embedding with glove
-##################################
+###################################################################
 import torchtext
 import spacy
 import random
@@ -34,18 +34,24 @@ from nltk.corpus import stopwords
 # download('stopwords') #stopwords dictionary, run once
 stop_words_en = set(stopwords.words('english'))
 
+import nltk
+nltk.download('wordnet')
+from nltk.stem import WordNetLemmatizer 
+from nltk.stem.porter import *
+lemmatizer = WordNetLemmatizer() 
+stemmer = PorterStemmer()
+frequency = 3
 
 def preprocess(sentence:str, nlp):
-
     text = sentence.lower()
-    doc = [token.lemma_ for token in nlp.tokenizer(text)]
+    # Perform lemma and stem
+    doc = [stemmer.stem(token.lemma_) for token in  nlp.tokenizer(text)]
     doc = [word for word in doc if word not in stop_words_en]
     doc = [word for word in doc if word.isalpha()] #restricts string to alphabetic characters only
     return doc
 
 def get_word_vector(embeddings, word):
   # get word embedding from glove
-
     try:
       vec = embeddings.vectors[embeddings.stoi[word]]
       return vec
@@ -53,7 +59,7 @@ def get_word_vector(embeddings, word):
       zeros = [1 for n in range(100)]
       return zeros
 
-def get_sentence_vector(embeddings,line):
+def get_sentence_vector_pca(embeddings,line):
   vectors = []
   for w in line:
     emb = get_word_vector(embeddings,w)
@@ -70,7 +76,7 @@ def get_sentence_vector(embeddings,line):
   # return torch.mean(torch.stack(vectors))
 
 
-def get_embeddings(f,embeddings,lang):
+def get_embeddings_pca(f,embeddings,lang):
   file = open(f) 
   lines = file.readlines() 
   sentences_vectors =[]
@@ -78,7 +84,7 @@ def get_embeddings(f,embeddings,lang):
   for l in lines:
     sentence= preprocess(l,lang)
     try:
-      vec = get_sentence_vector(embeddings,sentence)
+      vec = get_sentence_vector_pca(embeddings,sentence)
       sentences_vectors.extend(vec)
     except:
       zeros = np.ones((1,100))
@@ -86,18 +92,18 @@ def get_embeddings(f,embeddings,lang):
   
   return sentences_vectors
 
-#########################################
+#################################################################################
 # LODADING CHINESE WORD2VEC EMBEDDINGS. #
-#########################################
+#################################################################################
 
 from gensim.models import Word2Vec
 from gensim.models import KeyedVectors
 
 wv_from_bin = KeyedVectors.load_word2vec_format("model.bin", binary=True)
 
-##########################
+##################################################################################
 # PRE-PROCESSING CHINESE #
-##########################
+##################################################################################
 import string
 import jieba
 import gensim 
@@ -115,7 +121,7 @@ def processing_zh(sentence):
   docs = [e for e in doc if e.isalnum()] # only put the alphanumeric things into the documents
   return docs
 
-def get_sentence_vector_zh(line):
+def get_sentence_vector_zh_pca(line):
   '''
   Convert the line/sentence into a 100-dimension vector
 
@@ -143,25 +149,25 @@ def get_sentence_vector_zh(line):
   return vectors
   # return np.average(vectors)  # we would return a number, which represents the whole sentence.
 
-# def get_sentence_embeddings_zh(f):
-#
-#   file = open(f)
-#   lines = file.readlines()
-#   sentences_vectors =[] # 7000 x 100 in the future
-#
-#   for l in lines:
-#     sent = processing_zh(l)
-#     vec = get_sentence_vector_zh(sent)
-#     if vec is not None:
-#       sentences_vectors.extend(vec)
-#     else:
-#       print(l)
-#   return sentences_vectors
+ def get_sentence_embeddings_zh_pca(f):
+
+   file = open(f)
+   lines = file.readlines()
+   sentences_vectors =[] # 7000 x 100 in the future
+
+   for l in lines:
+     sent = processing_zh(l)
+     vec = get_sentence_vector_zh_pca(sent)
+     if vec is not None:
+       sentences_vectors.extend(vec)
+     else:
+       print(l)
+   return sentences_vectors
 
     
-#################################
+#########################################################################################
 # smooth inverse frequency (SIF)
-################################
+########################################################################################
 def calculate_words(lines,lang):
   '''
   calculate the size of vocab
@@ -191,11 +197,15 @@ def get_sentence_vector_sif(embeddings,line,word_size,dic):
   :return:
   '''
   alpha = 0.3
+  frequency = 3
   emb = torch.zeros(100)
+  # filer out the words of low frequency
   for w in line:
+    if(dic[w]<frequency):
+      continue
     pw = (dic[w]/word_size)
     word_vectors = get_word_vector(embeddings, w)
-    emb = emb +(alpha/(alpha+pw))*word_vectors  # Aplly SIF method
+    emb = emb +(alpha/(alpha+pw))*word_vectors  # Apply SIF method
 
   emb = emb/len(line)
 
@@ -243,6 +253,8 @@ def get_sentence_vector_zh_sif(line, word_size, dic):
   alpha = 0.3
   emb = np.zeros(100)
   for w in line:
+    if dic[w]<frequency:
+      continue
     pw = (dic[w]/word_size)
     try:
       word_vectors = wv_from_bin[w]
@@ -297,13 +309,81 @@ def get_sentence_embeddings_zh_sif(f) -> np.ndarray:
 
   return X_elite
 import jieba.posseg as pseg
+
+#########################################################################################
+# smooth inverse frequency (SIF_simplifed)
+########################################################################################
+
+def get_sentence_vector_sif_sip(embeddings,line,word_size,dic):
+
+  emb = torch.zeros(100)
+  # filer out the words of low frequency
+  for w in line:
+    if(dic[w]<frequency):
+      continue
+    pw = (dic[w]/word_size)
+    word_vectors= get_word_vector(embeddings,w)
+    emb = emb +(alpha/(alpha+pw))*word_vectors
+  emb = emb/len(line)
+  return np.array(emb)
+
+
+def get_embeddings_sif_sip(f,embeddings,lang):
+  file = open(f) 
+  lines = file.readlines() 
+  sentences_vectors =[]
+  word_size, dic = calculate_words(lines,lang)
+  for l in lines:
+    sentence= preprocess(l,lang)
+   # print(sentence)
+    try:
+      vec = get_sentence_vector_sif_sip(embeddings,sentence,word_size,dic)
+      sentences_vectors.append(vec)
+    except:
+      ones= np.ones((1,100))*1e-5
+      sentences_vectors.extend(ones)
+
+  return sentences_vectors
+
+def get_sentence_vector_zh_sif_sip(line,word_size,dic):
+  emb = np.array([0 for i in range(100)])
+  for w in line:
+    pw = (dic[w]/word_size)
+    try:
+      word_vectors = wv_from_bin[w] # obtain embedding from our embedding table with. a dimension of 100
+      emb = emb +(alpha/(alpha+pw))*np.array(word_vectors) # embeddings are concatenated one after another, we change the row rather than the column
+    except:
+      zeros = [random.random()/10000 for n in range(100)]
+      emb = emb +np.array(zeros)
+  return np.array(emb)
+
+def get_sentence_embeddings_zh_sif(f):
+  file = open(f) 
+  lines = file.readlines() 
+  word_size, dic = calculate_words_zh(lines)
+  #print(word_size)
+  sentences_vectors =[] # 7000 x 100
+  for l in lines:
+    sent  = processing_zh(l)
+    vec = get_sentence_vector_zh_sif_sip(sent,word_size,dic)
+    if vec is not None:
+      #sentences_vectors.append(np.concatenate((vec, postagger), axis=0))
+      sentences_vectors.append(vec)
+    else:
+      ones= np.ones((1,100))*1e-5
+      sentences_vectors.append(ones)
+      print(l)
+  return sentences_vectors
+
+
+
 def get_postagger(line):
  '''
   Get POS embedding for Chinese sentence.
   :param line:
-  :return: tagger embedding: np.ndarray shape:1 x 15
+  :return: tagger embedding: np.ndarray shape:1 x 10
   '''
-  num_tagger = 15
+  num_tagger = 10
   tagger=[0 for i in range(num_tagger)]
   jieba_dic={'n':1,'f':2,	's':3,'t':4,'nr':5,	'ns':6,'nt':7	,	'nw':8	,'nz':9,		'v':10,	
              'vd':11,		'vn':12,	'a':13,		'ad':14,	'an':15,		'd':16,	
@@ -311,7 +391,7 @@ def get_postagger(line):
              'c':21,		'u':22,		'xc':23,		'w':24,	
              'PER':25,		'LOC':26,		'ORG':27,		'TIME':28	}
   loc = 0
-  pos = pseg.cut(line,use_paddle=True) #paddle模式
+  pos = pseg.cut(line,use_paddle=True) #paddle
   #print(pos)
   for word, flag in pos:
     tagger[loc]=jieba_dic[flag]/10
@@ -326,12 +406,12 @@ def get_sentence_embeddings_zh_sif_pos(f):
   Convert sentences from chinese corpus into sentences embeddings
   Add POS tagger
   :param f:
-  :return: sentences_vectors shape: np.ndarray shape:7000 x 115
+  :return: sentences_vectors shape: np.ndarray shape:7000 x 110
   '''
   file = open(f) 
   lines = file.readlines() 
   word_size, dic = calculate_words_zh(lines)
-  sentences_vectors =[] # 7000 x 115
+  sentences_vectors =[] # 7000 x 110
   for l in lines:
     sent  = processing_zh(l)
     vec = get_sentence_vector_zh_sif(sent,word_size,dic)
@@ -340,7 +420,7 @@ def get_sentence_embeddings_zh_sif_pos(f):
     if vec is not None:
       sentences_vectors.append(np.concatenate((vec, postagger), axis=0))
     else:
-      ones= np.ones((1,115))
+      ones= np.ones((1,110))
       sentences_vectors.append(ones)
       print(l)
   return sentences_vectors
@@ -394,9 +474,9 @@ train_scores = get_scores("./train.enzh.scores")
 val_scores = get_scores("./dev.enzh.scores")
 
 
-######################
+##############################################################################
 # TRAINING REGRESSOR #
-######################
+##############################################################################
 
 # def rmse(predictions, targets):
 #     return np.sqrt(((predictions - targets) ** 2).mean())
@@ -410,9 +490,9 @@ val_scores = get_scores("./dev.enzh.scores")
 # X_train = np.concatenate((en_train_src_sif, zh_train_mt_sif), axis=1) # 7000 x 200
 # X_val = np.concatenate((en_val_src_sif, zh_val_mt_sif), axis=1)
 #
-# ############################
+# ####################################################################################
 # # SVR Regressor
-# ############################
+# ####################################################################################
 #
 from sklearn.svm import SVR
 from scipy.stats.stats import pearsonr
@@ -427,26 +507,31 @@ from scipy.stats.stats import pearsonr
 #     print(f'RMSE: {rmse(predictions,val_scores)} Pearson {pearson[0]}')
 #     print()
 
-############################
+####################################################################################
 # MLPR Regrssor
-############################
+####################################################################################
 
-# from sklearn.neural_network import MLPRegressor
-# for k in ['identity', 'logistic', 'tanh', 'relu']:
-#   mlp = MLPRegressor(activation=k)
-#   # print('input shapes are {} and {}'.format(X_train_zh.shape, y_train_zh.shape))
-#   mlp.fit(X_train_zh, y_train_zh)
-#   print(k)
-#   predictions =  mlp.predict(X_val_zh)
-#   pearson = pearsonr(y_val_zh, predictions)
-#   print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
-#   print()
-# Combine SIF(en) and PCA(zh) + SVM 'rbf': scores 0.3
+from sklearn.neural_network import MLPRegressor
+for k in ['identity', 'logistic', 'tanh', 'relu']:
+   mlp = MLPRegressor(activation=k)
+   # print('input shapes are {} and {}'.format(X_train_zh.shape, y_train_zh.shape))
+   mlp.fit(X_train_zh, y_train_zh)
+   print(k)
+   predictions =  mlp.predict(X_val_zh)
+   pearson = pearsonr(y_val_zh, predictions)
+   print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
+   print()
+#
 
-############################
+####################################################################################
 # NNdataset
-############################
-
+####################################################################################
+import nltk
+nltk.download('wordnet')
+from nltk.stem import WordNetLemmatizer 
+from nltk.stem.porter import *
+lemmatizer = WordNetLemmatizer() 
+stemmer = PorterStemmer()
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
@@ -458,6 +543,7 @@ from collections import defaultdict, Counter
 
 def en_tokenizer(sentence):
   text = sentence.lower()
+  #doc = [stemmer.stem(token.lemma_) for token in  nlp.tokenizer(text)]
   doc = [token.lemma_ for token in nlp_en.tokenizer(text)]
   doc = [word for word in doc if word not in stop_words_en]
   doc = [word for word in doc if word.isalpha()]  # restricts string to alphabetic characters only
@@ -677,9 +763,9 @@ criterion = nn.MSELoss()
 model.to(device)
 model.train()
 
-############################
+###############################################################################
 ###training
-############################
+###############################################################################
 for epoch in range(epoch_num):
 
     epoch_loss = 0
@@ -699,9 +785,9 @@ for epoch in range(epoch_num):
     print('epoch [{}/{}], loss = {:.6f}'.format(epoch, epoch_num, epoch_loss / len(loader_train)))
 
 
-############################
+###########################################################################
 ###testing
-############################
+###########################################################################
 loader_test = DataLoader(test_dat, batch_size, shuffle=True)
 test_samples, test_scores, _ = next(iter(loader_test))
 
