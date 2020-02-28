@@ -41,6 +41,7 @@ from nltk.stem.porter import *
 lemmatizer = WordNetLemmatizer() 
 stemmer = PorterStemmer()
 frequency = 3
+
 def preprocess(sentence:str, nlp):
     text = sentence.lower()
     # Perform lemma and stem
@@ -58,7 +59,7 @@ def get_word_vector(embeddings, word):
       zeros = [1 for n in range(100)]
       return zeros
 
-def get_sentence_vector(embeddings,line):
+def get_sentence_vector_pca(embeddings,line):
   vectors = []
   for w in line:
     emb = get_word_vector(embeddings,w)
@@ -75,7 +76,7 @@ def get_sentence_vector(embeddings,line):
   # return torch.mean(torch.stack(vectors))
 
 
-def get_embeddings(f,embeddings,lang):
+def get_embeddings_pca(f,embeddings,lang):
   file = open(f) 
   lines = file.readlines() 
   sentences_vectors =[]
@@ -83,7 +84,7 @@ def get_embeddings(f,embeddings,lang):
   for l in lines:
     sentence= preprocess(l,lang)
     try:
-      vec = get_sentence_vector(embeddings,sentence)
+      vec = get_sentence_vector_pca(embeddings,sentence)
       sentences_vectors.extend(vec)
     except:
       zeros = np.ones((1,100))
@@ -120,7 +121,7 @@ def processing_zh(sentence):
   docs = [e for e in doc if e.isalnum()] # only put the alphanumeric things into the documents
   return docs
 
-def get_sentence_vector_zh(line):
+def get_sentence_vector_zh_pca(line):
   '''
   Convert the line/sentence into a 100-dimension vector
 
@@ -148,20 +149,20 @@ def get_sentence_vector_zh(line):
   return vectors
   # return np.average(vectors)  # we would return a number, which represents the whole sentence.
 
-# def get_sentence_embeddings_zh(f):
-#
-#   file = open(f)
-#   lines = file.readlines()
-#   sentences_vectors =[] # 7000 x 100 in the future
-#
-#   for l in lines:
-#     sent = processing_zh(l)
-#     vec = get_sentence_vector_zh(sent)
-#     if vec is not None:
-#       sentences_vectors.extend(vec)
-#     else:
-#       print(l)
-#   return sentences_vectors
+ def get_sentence_embeddings_zh_pca(f):
+
+   file = open(f)
+   lines = file.readlines()
+   sentences_vectors =[] # 7000 x 100 in the future
+
+   for l in lines:
+     sent = processing_zh(l)
+     vec = get_sentence_vector_zh_pca(sent)
+     if vec is not None:
+       sentences_vectors.extend(vec)
+     else:
+       print(l)
+   return sentences_vectors
 
     
 #################################
@@ -337,12 +338,12 @@ def get_sentence_embeddings_zh_sif_pos(f):
   Convert sentences from chinese corpus into sentences embeddings
   Add POS tagger
   :param f:
-  :return: sentences_vectors shape: np.ndarray shape:7000 x 115
+  :return: sentences_vectors shape: np.ndarray shape:7000 x 110
   '''
   file = open(f) 
   lines = file.readlines() 
   word_size, dic = calculate_words_zh(lines)
-  sentences_vectors =[] # 7000 x 115
+  sentences_vectors =[] # 7000 x 110
   for l in lines:
     sent  = processing_zh(l)
     vec = get_sentence_vector_zh_sif(sent,word_size,dic)
@@ -351,7 +352,7 @@ def get_sentence_embeddings_zh_sif_pos(f):
     if vec is not None:
       sentences_vectors.append(np.concatenate((vec, postagger), axis=0))
     else:
-      ones= np.ones((1,115))
+      ones= np.ones((1,110))
       sentences_vectors.append(ones)
       print(l)
   return sentences_vectors
@@ -442,17 +443,17 @@ from scipy.stats.stats import pearsonr
 # MLPR Regrssor
 ############################
 
-# from sklearn.neural_network import MLPRegressor
-# for k in ['identity', 'logistic', 'tanh', 'relu']:
-#   mlp = MLPRegressor(activation=k)
-#   # print('input shapes are {} and {}'.format(X_train_zh.shape, y_train_zh.shape))
-#   mlp.fit(X_train_zh, y_train_zh)
-#   print(k)
-#   predictions =  mlp.predict(X_val_zh)
-#   pearson = pearsonr(y_val_zh, predictions)
-#   print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
-#   print()
-# Combine SIF(en) and PCA(zh) + SVM 'rbf': scores 0.3
+from sklearn.neural_network import MLPRegressor
+for k in ['identity', 'logistic', 'tanh', 'relu']:
+   mlp = MLPRegressor(activation=k)
+   # print('input shapes are {} and {}'.format(X_train_zh.shape, y_train_zh.shape))
+   mlp.fit(X_train_zh, y_train_zh)
+   print(k)
+   predictions =  mlp.predict(X_val_zh)
+   pearson = pearsonr(y_val_zh, predictions)
+   print(f'RMSE: {rmse(predictions,y_val_zh)} Pearson {pearson[0]}')
+   print()
+#
 
 ############################
 # NNdataset
