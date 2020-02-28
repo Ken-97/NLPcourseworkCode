@@ -6,13 +6,39 @@ import numpy as np
 import torch.nn as nn
 import os
 from scipy.stats.stats import pearsonr
+import torchtext
+import spacy
+import jieba
+from nltk.corpus import stopwords
+from collections import Counter
+from nltk import download
 
+#Embeddings
+glove = torchtext.vocab.GloVe(name='6B', dim=100)
+
+#tokenizer model
+nlp_en =spacy.load('en300')
+
+download('stopwords') #stopwords dictionary, run once
+stop_words = set(stopwords.words('english'))
+
+def en_tokenizer(sentence):
+  text = sentence.lower()
+  doc = [token.lemma_ for token in nlp_en.tokenizer(text)]
+  doc = [word for word in doc if word not in stop_words]
+  doc = [word for word in doc if word.isalpha()]  # restricts string to alphabetic characters only
+  return doc
+
+def zh_tokenizer(sentence):
+  # a chinese sentence is inputed and tokenized
+  seg_list = jieba.lcut(sentence, cut_all=True)
+  doc = [word for word in seg_list if word not in stop_words and word != ' ' and word != '\n']
+  docs = [e for e in doc if e.isalnum()]
+  return docs
 
 class RegressionDataset:
   '''
-  Data structure for our translation regression model.
-
-  Load english and chinese corpus via their pathes. tokenize them with process function.
+  load english and chinese corpus via their pathes. tokenize them with process function.
   Then we create idx2word dict with class Vocabulary for all the words in the corresponding corpus.
   Using this dict, we convert all the words, start stop as well as padding sign in each sentence into vector filled with
   idx.
@@ -21,17 +47,22 @@ class RegressionDataset:
   def __init__(self, src_file_path, tar_file_path, score_path):
     self.src_file = src_file_path
     self.tar_file = tar_file_path
+    self.vocab = NLPVocabulary()
+    self.vocab.add_from_file(fname=src_file_path, lang="en")
+    self.vocab.add_from_file(fname=tar_file_path, lang="zh")
     self.score_path = score_path
     self.padded_idxs = None
     self.attention_mask = None
+
+    print(len(self.vocab))
 
     sents_idx_en = []
 
     with open(self.src_file, "r") as f:
       lines = f.readlines()
       for l in lines:
-        sentence = tokenizer_en.encode(text=l, add_special_tokens=True)
-        idxs = sentence
+        sentence = en_tokenizer(l)
+        idxs = self.vocab.convert_words_to_idxs(sentence, add_eos=True)
         sents_idx_en.append(idxs)
 
     sents_src_transformed = [torch.tensor(sent).unsqueeze(1) for sent in sents_idx_en]
@@ -41,8 +72,8 @@ class RegressionDataset:
     with open(self.tar_file, "r") as f:
       lines = f.readlines()
       for l in lines:
-        sentence = tokenizer_zh.encode(text=l, add_special_tokens=True)
-        idxs = sentence
+        sentence = zh_tokenizer(l)
+        idxs = self.vocab.convert_words_to_idxs(sentence, add_eos=True)
         sents_idx_zh.append(idxs)
 
     sents_tar_transformed = [torch.tensor(sent).unsqueeze(1) for sent in sents_idx_zh]
@@ -67,6 +98,86 @@ class RegressionDataset:
       scores = np.array(scores).astype(float)
       scores = torch.tensor(scores)
       return scores
+
+
+
+class NLPVocabulary(object):
+  '''
+  Choose whether to add bos or eos to each sentence by setting add_bos add_eos
+  Choose min_size to kick out less frequent vocab.
+  '''
+
+  def __init__(self):
+
+    self._word2idx = {}
+    self.vocab_counter = Counter()
+    # 0-padding token
+    self.add_word('<pad>')
+    # sentence start
+    self.add_word('<s>')
+    # sentence end
+    self.add_word('</s>')
+    # Unknown words
+    self.add_word('<unk>')
+
+    self._pad_idx = self._word2idx['<pad>']
+    self._bos_idx = self._word2idx['<s>']
+    self._eos_idx = self._word2idx['</s>']
+    self._unk_idx = self._word2idx['<unk>']
+
+  def word2idx(self, word):
+    if word not in self._word2idx:
+      idx = self._unk_idx
+    else:
+      idx = self._word2idx[word]
+    return idx
+
+  def add_word(self, word):
+    if word not in self._word2idx:
+      if not self._word2idx:
+        self._word2idx[word] = 0
+      else:
+        self._word2idx[word] = len(self._word2idx)
+
+  def count_word(self, word):
+
+    self.vocab_counter[word] += 1
+
+  def add_from_file(self, fname, lang):
+
+    with open(fname) as f:
+      if lang == "en":
+        for line in f:
+          tokens = en_tokenizer(line)
+          for tk in tokens:
+            self.count_word(tk)
+
+      if lang == "zh":
+        for line in f:
+          tokens = zh_tokenizer(line)
+          for tk in tokens:
+            self.count_word(tk)
+
+  def rm_less_frequent(self, min_size):
+    '''
+    remove vocabulary that is less frequent
+    :return:
+    '''
+    self._list_reduced = [word for word, item in self.vocab_counter.items() if item > min_size]
+    for idx, word in enumerate(self._list_reduced):
+      self._word2idx[word] = idx+3
+
+  def convert_words_to_idxs(self, words, add_bos=False, add_eos=False):
+
+    idxs = [self.word2idx(w) for w in words]
+    if add_bos:
+      idxs.insert(0, self.word2idx('<s>'))
+    if add_eos:
+      idxs.append(self.word2idx('</s>'))
+    return idxs
+
+  def __len__(self):
+    return len(self._word2idx)
 
 
 class RegressionBert(nn.Module):
