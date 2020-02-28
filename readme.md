@@ -2,6 +2,24 @@
 
 This coursework is contributed by Zhiquan Li, Bohua Peng and Yifan Zhou. Two files are provided in this repository: coursework.py and bret.py. The first python file provides the implementation of our improved baseline architecture. The second python file provides the implementation of the BERT architecture we mentioned in our report.
 
+## Abstract
+
+Our implementations aims to develop a regression modelfor prediction on the quality of machine trans-lation.  In this repository, we conduct several ex-periments on pre-processing, sentence embed-ding and regression models, based on the train-ing  data:  language  pairs  (English  -  Chinese) and  translation  scores. We  also  try  to  use BERT  to  train  a  regression  model  for  betterprediction. The best result comes from sim-plified SIF model along with SVM regressorwith the kernel value of ’RBF’.
+
+## Results
+
+We calculate the pearson value of each model on test or validation set.
+
+|            Model            | Test Set | Validation Set |
+| :-------------------------: | :------: | :------------: |
+|      SIF+SVM(rbf)+POS       |   0.29   |      0.26      |
+|        SIF+SVM(rbf)         |    /     |      0.27      |
+| **SIF(Modified)+ SVM(rbf)** | **0.30** |    **0.29**    |
+|      PCA+SVM(logistic)      |   0.25   |      0.21      |
+|            BERT             |    /     |      0.06      |
+
+From table  above, we notice that our simplified SIF model performs the best results along with SVM regressor with the kernel value of 'RBF'.  
+
 ## Module Explanation
 
 The file coursework.py contains 5 modules that indicate our contribution to this improved baseline model.
@@ -10,11 +28,11 @@ The file coursework.py contains 5 modules that indicate our contribution to this
 
   * get_embeddings_pca()
     	Input: file path for English sentences
-    	Output: Sentence embedding using PCA model
+      	Output: Sentence embedding using PCA model
 
   * get_sentence_embeddings_zh_pca()
     	Input: file path for Chinese sentences
-    	Output: Sentence embedding using PCA model
+      	Output: Sentence embedding using PCA model
 
     An example code to get a sentence embedding is provided below. Functions listed below use similar methods to get sentence embeddings.
 
@@ -27,8 +45,8 @@ The file coursework.py contains 5 modules that indicate our contribution to this
 
   * get_embeddings_sif()
     	Input: file path for English sentences
-    	Output: Sentence embedding using SIF model
-    	
+      	Output: Sentence embedding using SIF model
+      	
     get_sentence_embeddings_zh_sif()
      	Input: file path for Chinese sentences
     	Output: Sentence embedding using SIF model
@@ -37,8 +55,8 @@ The file coursework.py contains 5 modules that indicate our contribution to this
 
   * get_embeddings_sif_sip()
     	Input: file path for English sentences
-    	Output: Sentence embedding using SIF model
-    	
+      	Output: Sentence embedding using SIF model
+      	
     get_sentence_embeddings_zh_sif_sip()
      	Input: file path for Chinese sentences
     	Output: Sentence embedding using SIF model
@@ -47,7 +65,7 @@ The file coursework.py contains 5 modules that indicate our contribution to this
 
   * get_postagger()
     	Input: words sequence
-    	Output: pos tag sequence
+      	Output: pos tag sequence
 
 As for the bert.py, the key module is the model module.
 
