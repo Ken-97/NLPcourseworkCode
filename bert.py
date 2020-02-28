@@ -155,7 +155,7 @@ for epoch in range(epoch_num):
 os.chdir('./')
 
 
-def test(
+def test_bert(
          test_en_file_path="dev.enzh.src",
          test_zh_file_path="dev.enzh.en",
          score_file_path="dev.enzh.scores",

@@ -37,6 +37,11 @@ get_postagger()
 	Input: words sequence
 	Output: pos tag sequence
 
+5)Bert end-to-end regression model
+model(transformer_model=bert)
+    Input: indices of sentence shape:batch_size*sentence_largest_length
+	Output: score tensor shape:batch_size*1
+
 ********************** Test case **********************
 zh_train_mt = get_sentence_embeddings_zh("./train.enzh.mt") # Chinese
 
@@ -53,3 +58,17 @@ X_train_zh = np.array(X_train).transpose()
 #Predict
 clf_zh = SVR(kernel='rbf')
 clf_zh.fit(X_train_zh, y_train_zh)
+
+********************** Test case **********************
+#run test function
+test_bert(
+         test_en_file_path="dev.enzh.src",
+         test_zh_file_path="dev.enzh.en",
+         score_file_path="dev.enzh.scores",
+         test_batch_size=1000):
+     Input: english test file path
+            chinese test file path
+            score file path
+            test batch size for test dataloader
+
+
